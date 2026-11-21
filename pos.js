@@ -4,9 +4,17 @@
  * Communicates with Laptop 1 (ZeroSpoil Middleware Server) over LAN
  */
 
+// Laptop 1 LAN Backend URL Default
+const LAPTOP_1_DEFAULT_URL = 'http://172.30.7.105:8000';
+let initialUrl = localStorage.getItem('freshmart_backend_url');
+if (!initialUrl || initialUrl.includes('localhost')) {
+  initialUrl = LAPTOP_1_DEFAULT_URL;
+  localStorage.setItem('freshmart_backend_url', LAPTOP_1_DEFAULT_URL);
+}
+
 // Global App State
 const state = {
-  backendUrl: localStorage.getItem('freshmart_backend_url') || 'http://localhost:8000',
+  backendUrl: initialUrl,
   inventoryBatches: [],
   previousQuantities: new Map(), // batchId -> qty (to detect live shopper claims)
   agentAuditLogs: [],
@@ -270,7 +278,7 @@ function updateConnectionText() {
 // Check if any item's stock was claimed in real time (e.g. from Laptop 1 consumer feed)
 function detectStockDecrements(newBatches) {
   newBatches.forEach(batch => {
-    const batchId = batch._id || batch.id;
+    const batchId = batch.batch_id || batch._id || batch.id;
     if (!batchId) return;
 
     const oldQty = state.previousQuantities.get(batchId);
@@ -322,7 +330,8 @@ function renderKPIs() {
     const hours = Number(b.hours_to_expiry) || 0;
     const price = Number(b.retail_price) || 0;
     const qty = Number(b.quantity) || 0;
-    if (hours <= 24 && b.status !== 'DONATED' && b.status !== 'BIOGAS_QUARANTINE') {
+    const isQuarantined = b.status === 'BIOGAS_QUARANTINE' || b.status === 'BIOGAS_COMPOST';
+    if (hours <= 24 && b.status !== 'DONATED' && !isQuarantined) {
       nearExpiryValue += (price * qty);
       nearExpiryCount++;
     }
@@ -336,6 +345,7 @@ function renderKPIs() {
   // Cold-Chain Quarantined Alerts
   const quarantinedCount = batches.filter(b => 
     b.status === 'BIOGAS_QUARANTINE' || 
+    b.status === 'BIOGAS_COMPOST' || 
     (Number(b.max_recorded_temp_c) > Number(b.safe_temp_limit_c))
   ).length;
 
@@ -378,11 +388,12 @@ function renderTable() {
 
   // Filter batches
   let filtered = allBatches.filter(batch => {
+    const isQuarantined = batch.status === 'BIOGAS_QUARANTINE' || batch.status === 'BIOGAS_COMPOST';
     // Status Filter
     if (state.activeFilter === 'ACTIVE' && batch.status !== 'ACTIVE') return false;
     if (state.activeFilter === 'MARKED_DOWN' && batch.status !== 'MARKED_DOWN') return false;
     if (state.activeFilter === 'DONATED' && batch.status !== 'DONATED') return false;
-    if (state.activeFilter === 'BIOGAS_QUARANTINE' && batch.status !== 'BIOGAS_QUARANTINE') return false;
+    if (state.activeFilter === 'BIOGAS_QUARANTINE' && !isQuarantined) return false;
     if (state.activeFilter === 'BREACH') {
       const isBreached = Number(batch.max_recorded_temp_c) > Number(batch.safe_temp_limit_c);
       if (!isBreached) return false;
@@ -391,7 +402,7 @@ function renderTable() {
     // Search Query
     if (state.searchQuery) {
       const q = state.searchQuery.toLowerCase();
-      const id = (batch._id || batch.id || '').toLowerCase();
+      const id = (batch.batch_id || batch._id || batch.id || '').toLowerCase();
       const name = (batch.sku_name || '').toLowerCase();
       const cat = (batch.category || '').toLowerCase();
       if (!id.includes(q) && !name.includes(q) && !cat.includes(q)) {
@@ -423,7 +434,7 @@ function renderTable() {
   const newRowElements = [];
 
   filtered.forEach(batch => {
-    const batchId = batch._id || batch.id || `BATCH-${Math.random()}`;
+    const batchId = batch.batch_id || batch._id || batch.id || `BATCH-${Math.random()}`;
     let tr = existingRows.get(batchId);
 
     if (!tr) {
@@ -508,6 +519,7 @@ function generateRowHtml(batch, batchId) {
         </div>
       `;
       break;
+    case 'BIOGAS_COMPOST':
     case 'BIOGAS_QUARANTINE':
       statusBadgeHtml = `
         <div class="status-pill status-BIOGAS_QUARANTINE">
@@ -516,10 +528,11 @@ function generateRowHtml(batch, batchId) {
         </div>
       `;
       break;
+    case 'PAUSED_HITL':
     case 'PENDING_HITL':
       statusBadgeHtml = `
         <div class="status-pill status-PENDING_HITL">
-          <strong>PENDING HITL</strong>
+          <strong>PAUSED HITL</strong>
           <small>Manager Margin Review</small>
         </div>
       `;
@@ -536,7 +549,8 @@ function generateRowHtml(batch, batchId) {
   }
 
   // Row Action Button
-  const isSpikeDisabled = isBreached || status === 'BIOGAS_QUARANTINE';
+  const isQuarantined = status === 'BIOGAS_QUARANTINE' || status === 'BIOGAS_COMPOST';
+  const isSpikeDisabled = isBreached || isQuarantined;
 
   return `
     <td>
@@ -624,23 +638,32 @@ function renderTicker() {
         tagText = 'NGO RESCUE';
       }
     } else if (typeof log === 'object' && log !== null) {
-      action = log.action || log.event || 'AUDIT_ACTION';
-      details = log.message || log.description || log.sku_name || JSON.stringify(log);
+      const bId = log.batch_id ? `[${log.batch_id}] ` : '';
+      const verdict = log.safety_verdict || '';
+      const rail = log.rail_triggered && log.rail_triggered !== 'NONE' ? `${log.rail_triggered}: ` : '';
+      const finalTool = log.final_tool || log.action || '';
+      
+      details = `${bId}${rail}${log.explanation || log.message || log.item_name || ''}`;
       if (log.timestamp) {
         timeStr = new Date(log.timestamp).toLocaleTimeString('en-IN', { hour12: false });
       }
-      if (action.includes('QUARANTINE') || details.includes('Unsafe') || details.includes('Temp')) {
+
+      if (verdict === 'BLOCKED_REROUTED' || rail.includes('COLD_CHAIN') || finalTool.includes('biogas')) {
         railClass = 'rail-breach';
         tagClass = 'tag-quarantine';
         tagText = 'SAFETY RAIL';
-      } else if (action.includes('MARKDOWN') || details.includes('Markdown')) {
+      } else if (finalTool.includes('markdown') || verdict === 'APPROVED') {
         railClass = 'rail-pricing';
         tagClass = 'tag-markdown';
         tagText = 'DYNAMIC PRICING';
-      } else if (action.includes('DONAT') || details.includes('NGO')) {
+      } else if (finalTool.includes('donation') || finalTool.includes('ngo')) {
         railClass = 'rail-ngo';
         tagClass = 'tag-donation';
-        tagText = 'NGO DISPATCH';
+        tagText = 'NGO RESCUE';
+      } else if (verdict === 'PAUSED_HITL' || rail.includes('MARGIN')) {
+        railClass = 'rail-audit';
+        tagClass = 'tag-quarantine';
+        tagText = 'MARGIN GATE';
       }
     }
 
@@ -701,7 +724,7 @@ async function triggerChillerFault(batchId) {
 }
 
 function applyLocalTempSpike(batchId) {
-  const target = state.inventoryBatches.find(b => (b._id || b.id) === batchId);
+  const target = state.inventoryBatches.find(b => (b.batch_id || b._id || b.id) === batchId);
   if (target) {
     target.max_recorded_temp_c = 9.5;
     target.status = 'BIOGAS_QUARANTINE';
@@ -780,15 +803,15 @@ function handleAuditResult(result) {
   let donations = result.donated_count ?? result.donations ?? 0;
   let blocks = result.quarantined_count ?? result.safety_blocks ?? 0;
 
-  // If specific counts aren't in response root, summarize from audits array if present
-  if (Array.isArray(result.actions)) {
-    markdowns = result.actions.filter(a => (a.action || '').includes('MARKDOWN')).length;
-    donations = result.actions.filter(a => (a.action || '').includes('DONAT')).length;
-    blocks = result.actions.filter(a => (a.action || '').includes('QUARANTINE')).length;
+  const logs = result.audit_logs || result.actions;
+  if (Array.isArray(logs)) {
+    markdowns = logs.filter(a => (a.final_tool || a.action || '').includes('markdown')).length;
+    donations = logs.filter(a => (a.final_tool || a.action || '').includes('donation') || (a.final_tool || '').includes('ngo')).length;
+    blocks = logs.filter(a => (a.safety_verdict || '').includes('BLOCKED') || (a.final_tool || '').includes('biogas')).length;
   }
 
   showToast(
-    `Audit Executed: ${markdowns} Dynamic Markdowns Applied, ${donations} NGO Rescues Booked, ${blocks} Safety-Rail Blocks Enforced.`,
+    `Audit Executed: ${markdowns} Dynamic Markdowns, ${donations} NGO Rescues, ${blocks} Safety-Rail Blocks.`,
     'success',
     '⚡ 7:00 PM CLEARANCE COMPLETE'
   );
@@ -873,7 +896,7 @@ async function handleInwardSubmit(event) {
     }
 
     const created = await response.json();
-    const batchId = created._id || created.id || 'NEW-BATCH';
+    const batchId = created.batch_id || created._id || created.id || 'NEW-BATCH';
 
     showToast(
       `Successfully inwarded ${payload.quantity} ${payload.unit} of "${payload.sku_name}" (${batchId})!`,
