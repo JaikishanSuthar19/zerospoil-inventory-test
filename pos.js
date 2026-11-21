@@ -97,6 +97,12 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function initPOS() {
+  // Always default to Laptop 1 LAN IP if empty or still on localhost
+  if (!state.backendUrl || state.backendUrl.includes('localhost')) {
+    state.backendUrl = LAPTOP_1_DEFAULT_URL;
+    localStorage.setItem('freshmart_backend_url', LAPTOP_1_DEFAULT_URL);
+  }
+
   // 1. Initialize Backend URL Input
   const urlInput = document.getElementById('backendUrl');
   if (urlInput) {
@@ -111,7 +117,7 @@ function initPOS() {
 
   // 3. Preload initial fallback batches so screen looks active immediately
   state.inventoryBatches = [...STANDBY_DEMO_BATCHES];
-  state.inventoryBatches.forEach(b => state.previousQuantities.set(b._id || b.id, b.quantity));
+  state.inventoryBatches.forEach(b => state.previousQuantities.set(b.batch_id || b._id || b.id, b.quantity));
   renderUI();
 
   // 4. Start Polling Loop (every 2 seconds)
@@ -120,6 +126,15 @@ function initPOS() {
   // 5. Update Loading Display
   const loadingDisplay = document.getElementById('loadingUrlDisplay');
   if (loadingDisplay) loadingDisplay.textContent = state.backendUrl;
+}
+
+function connectLaptop1() {
+  state.backendUrl = LAPTOP_1_DEFAULT_URL;
+  localStorage.setItem('freshmart_backend_url', LAPTOP_1_DEFAULT_URL);
+  const urlInput = document.getElementById('backendUrl');
+  if (urlInput) urlInput.value = LAPTOP_1_DEFAULT_URL;
+  showToast(`Configured ZeroSpoil URL to ${LAPTOP_1_DEFAULT_URL}`, 'info', '⚡ LAPTOP 1 SELECTED');
+  forceRefresh();
 }
 
 /* ==========================================================================

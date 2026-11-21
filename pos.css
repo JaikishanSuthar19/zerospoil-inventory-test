@@ -336,6 +336,17 @@ body {
   border-color: #64748b;
 }
 
+.btn-quick-laptop1 {
+  background: #0284c7;
+  border-color: #38bdf8;
+  color: #ffffff;
+}
+
+.btn-quick-laptop1:hover {
+  background: #0369a1;
+  box-shadow: 0 0 8px rgba(56, 189, 248, 0.4);
+}
+
 .connection-status-panel {
   display: flex;
   align-items: center;
