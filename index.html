@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FreshMart Retail POS & Cold-Chain ERP v4.2</title>
+  <link rel="stylesheet" href="pos.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+  <!-- Toast Notification Hub -->
+  <div id="toastContainer" class="toast-container" aria-live="polite"></div>
+
+  <!-- Main POS Application Wrapper -->
+  <div class="pos-app">
+    
+    <!-- TOP HEADER & LAN CONNECTION BAR -->
+    <header class="pos-header">
+      <div class="header-main">
+        <div class="brand-block">
+          <div class="brand-logo">
+            <span class="logo-icon">🛒</span>
+            <div class="brand-text">
+              <div class="brand-title-wrap">
+                <h1 class="brand-title">FreshMart Retail POS & Cold-Chain ERP</h1>
+                <span class="version-tag">v4.2 Enterprise</span>
+              </div>
+              <p class="brand-subtitle">
+                <span class="store-id">STORE: FM-PNV-04</span>
+                <span class="bullet">•</span>
+                <span class="store-name">Panvel Flagship Hypermarket</span>
+                <span class="bullet">•</span>
+                <span class="terminal-badge">Terminal #02 (Cold-Chain Bay)</span>
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="header-right">
+          <!-- Realtime Digital Clock -->
+          <div class="pos-clock">
+            <div class="clock-label">STORE TIME</div>
+            <div id="liveClock" class="clock-digits">--:--:-- IST</div>
+          </div>
+
+          <!-- Quick Actions & Clearance Trigger -->
+          <button id="btnRunAudit" class="btn-audit" onclick="triggerAutoClearance()">
+            <span class="audit-icon">⚡</span>
+            <span class="audit-label">
+              <strong>Run 7:00 PM ZeroSpoil Clearance</strong>
+              <small>Autonomous AI Markdown & Rescue</small>
+            </span>
+            <span id="auditSpinner" class="spinner hidden"></span>
+          </button>
+        </div>
+      </div>
+
+      <!-- LAN & Middleware Connection Ribbon -->
+      <div class="connection-ribbon">
+        <div class="connection-inputs">
+          <label for="backendUrl" class="conn-label">
+            <span class="pulse-icon">📡</span> ZeroSpoil Server URL:
+          </label>
+          <div class="input-with-button">
+            <input 
+              type="text" 
+              id="backendUrl" 
+              class="conn-input" 
+              placeholder="http://192.168.x.x:8000 or http://localhost:8000"
+              spellcheck="false"
+            />
+            <button id="btnConnect" class="btn-connect" onclick="applyBackendUrl()">Save & Connect</button>
+          </div>
+        </div>
+
+        <div class="connection-status-panel">
+          <div class="status-indicator-box">
+            <span id="connDot" class="status-dot dot-connecting"></span>
+            <span id="connStatusText" class="status-text">CONNECTING...</span>
+          </div>
+          <span class="separator">|</span>
+          <span id="lastSyncedText" class="sync-text">Never synced</span>
+          <button class="btn-quick-ping" title="Force Sync Now" onclick="forceRefresh()">↻ Sync</button>
+        </div>
+      </div>
+
+      <!-- STANDALONE LAPTOP-2 TESTING & SIMULATION TOOLBAR -->
+      <div class="testing-sandbox-bar" id="sandboxTestingBar">
+        <div class="sandbox-tag">
+          <span class="sandbox-badge">🧪 LAPTOP-2 STANDALONE TEST MODE</span>
+          <span class="sandbox-hint">Laptop 1 offline? Test every single feature locally:</span>
+        </div>
+        <div class="sandbox-actions">
+          <button type="button" class="btn-sandbox btn-sb-claim" onclick="simulateShopperClaim()" title="Simulate a consumer claiming a deal on Laptop 1">
+            🛒 Simulate Shopper Claim (-1 Stock)
+          </button>
+          <button type="button" class="btn-sandbox btn-sb-spike" onclick="simulateQuickSpike()" title="Simulate +5°C Chiller Failure">
+            🔥 Trigger +5°C Chiller Breach
+          </button>
+          <button type="button" class="btn-sandbox btn-sb-audit" onclick="triggerAutoClearance()" title="Simulate 7:00 PM ZeroSpoil AI Clearance">
+            ⚡ Run 7:00 PM Auto-Clearance
+          </button>
+          <button type="button" class="btn-sandbox btn-sb-reset" onclick="resetToDemoBatches()" title="Reset all inventory and logs to initial state">
+            🔄 Reset Demo Data
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- MAIN DASHBOARD CONTENT -->
+    <main class="pos-main">
+
+      <!-- TOP METRIC CARDS -->
+      <section class="kpi-grid">
+        <div class="kpi-card">
+          <div class="kpi-header">
+            <span class="kpi-title">TOTAL STORE SKUs</span>
+            <span class="kpi-icon icon-slate">📦</span>
+          </div>
+          <div class="kpi-value" id="kpiTotalSkus">0</div>
+          <div class="kpi-footer">
+            <span class="kpi-sub" id="kpiActiveSkus">0 Active Shelf Batches</span>
+          </div>
+        </div>
+
+        <div class="kpi-card">
+          <div class="kpi-header">
+            <span class="kpi-title">NEAR-EXPIRY VALUE</span>
+            <span class="kpi-icon icon-amber">⏳</span>
+          </div>
+          <div class="kpi-value text-amber" id="kpiAtRiskValue">₹0.00</div>
+          <div class="kpi-footer">
+            <span class="kpi-sub" id="kpiAtRiskCount">0 batches &le; 24h to expiry</span>
+          </div>
+        </div>
+
+        <div class="kpi-card">
+          <div class="kpi-header">
+            <span class="kpi-title">AUTO-CLEARED / RESCUED</span>
+            <span class="kpi-icon icon-emerald">🏷️</span>
+          </div>
+          <div class="kpi-value text-emerald" id="kpiRescuedCount">0</div>
+          <div class="kpi-footer">
+            <span class="kpi-sub" id="kpiRescuedDetail">0 Marked Down • 0 Donated</span>
+          </div>
+        </div>
+
+        <div class="kpi-card danger-card" id="kpiQuarantineCard">
+          <div class="kpi-header">
+            <span class="kpi-title">COLD-CHAIN BREACH ALERTS</span>
+            <span class="kpi-icon icon-crimson">❄️</span>
+          </div>
+          <div class="kpi-value text-crimson" id="kpiQuarantineCount">0</div>
+          <div class="kpi-footer">
+            <span class="kpi-sub" id="kpiQuarantineDetail">0 Quarantined (Temp &gt; Limit)</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- RECEIVE NEAR-EXPIRY STOCK SECTION (DRAWER / CARD) -->
+      <section class="inward-section">
+        <div class="inward-header">
+          <div class="inward-title-group">
+            <span class="section-badge">RECEIVING DOCK</span>
+            <h2 class="inward-title">Inward Near-Expiry Inventory Batch</h2>
+            <p class="inward-sub">Record incoming batches with sensor logs to trigger autonomous shelf-life evaluation</p>
+          </div>
+          <div class="preset-pill-group">
+            <span class="preset-label">1-Click Demo Presets:</span>
+            <button type="button" class="btn-preset preset-bakery" onclick="fillPreset('BAKERY_SAFE')">
+              🥐 Fill Safe Bakery Surplus
+            </button>
+            <button type="button" class="btn-preset preset-dairy-trap" onclick="fillPreset('WARM_DAIRY')">
+              ⚠️ Fill Warm Dairy Trap (+5°C Breach)
+            </button>
+            <button type="button" class="btn-preset preset-produce" onclick="fillPreset('PRODUCE_DISCOUNT')">
+              🥗 Fill Farm-Fresh Greens
+            </button>
+          </div>
+        </div>
+
+        <form id="inwardForm" class="inward-form" onsubmit="handleInwardSubmit(event)">
+          <div class="form-grid">
+            <div class="form-group form-col-span-2">
+              <label for="skuName">Product / SKU Name *</label>
+              <input type="text" id="skuName" required placeholder="e.g. Amul Taaza Homogenized Milk (1L)" />
+            </div>
+
+            <div class="form-group">
+              <label for="category">Category *</label>
+              <select id="category" required onchange="handleCategoryChange()">
+                <option value="DAIRY">DAIRY (Cold Chiller &le; 4°C)</option>
+                <option value="BAKERY">BAKERY (Ambient &le; 25°C)</option>
+                <option value="PRODUCE">PRODUCE (Crisper &le; 10°C)</option>
+                <option value="READY_TO_EAT">READY_TO_EAT (Deli &le; 5°C)</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label for="quantity">In-Store Quantity *</label>
+              <div class="input-unit-group">
+                <input type="number" id="quantity" min="1" step="1" required placeholder="25" />
+                <select id="unit" class="select-unit">
+                  <option value="packs">packs</option>
+                  <option value="units">units</option>
+                  <option value="bottles">bottles</option>
+                  <option value="trays">trays</option>
+                  <option value="kg">kg</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="wholesaleCost">Wholesale Cost (₹) *</label>
+              <input type="number" id="wholesaleCost" min="0" step="0.5" required placeholder="48.0" />
+            </div>
+
+            <div class="form-group">
+              <label for="retailPrice">Retail Shelf Price (₹) *</label>
+              <input type="number" id="retailPrice" min="1" step="0.5" required placeholder="56.0" />
+            </div>
+
+            <div class="form-group">
+              <label for="hoursToExpiry">Expiry Window (Hours) *</label>
+              <input type="number" id="hoursToExpiry" min="1" max="720" required placeholder="14" />
+            </div>
+
+            <div class="form-group">
+              <label for="maxTemp">Chiller Sensor Temp (°C) *</label>
+              <input type="number" id="maxTemp" step="0.1" required placeholder="3.5" />
+            </div>
+
+            <div class="form-group">
+              <label for="safeTemp">Safe Temp Limit (°C) *</label>
+              <input type="number" id="safeTemp" step="0.1" required placeholder="4.0" />
+            </div>
+          </div>
+
+          <div class="form-actions">
+            <button type="submit" id="btnSubmitBatch" class="btn-submit-batch">
+              <span class="icon">📥</span> Inward Batch to POS & Live Middleware
+            </button>
+            <button type="button" class="btn-clear-form" onclick="resetInwardForm()">Reset Form</button>
+          </div>
+        </form>
+      </section>
+
+      <!-- LIVE INVENTORY & CHILLER TELEMETRY TABLE -->
+      <section class="table-section">
+        <div class="table-toolbar">
+          <div class="toolbar-left">
+            <h2 class="table-title">Live Store Inventory & Chiller Telemetry</h2>
+            <span class="sync-badge">
+              <span class="pulse-indicator"></span> Auto-Syncing with ZeroSpoil (2s)
+            </span>
+          </div>
+
+          <div class="toolbar-right">
+            <!-- Filter Pills -->
+            <div class="filter-pills" id="filterPills">
+              <button class="pill active" data-filter="ALL" onclick="setFilter('ALL')">All Batches</button>
+              <button class="pill" data-filter="ACTIVE" onclick="setFilter('ACTIVE')">Active</button>
+              <button class="pill" data-filter="MARKED_DOWN" onclick="setFilter('MARKED_DOWN')">Marked Down</button>
+              <button class="pill" data-filter="DONATED" onclick="setFilter('DONATED')">Donated</button>
+              <button class="pill" data-filter="BIOGAS_QUARANTINE" onclick="setFilter('BIOGAS_QUARANTINE')">Quarantined</button>
+              <button class="pill" data-filter="BREACH" onclick="setFilter('BREACH')">Temp Breached</button>
+            </div>
+
+            <!-- Search -->
+            <div class="search-box">
+              <span class="search-icon">🔍</span>
+              <input 
+                type="text" 
+                id="searchTable" 
+                placeholder="Search SKU name, batch ID..." 
+                oninput="handleSearch(this.value)"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div class="table-container">
+          <table class="pos-table" id="posInventoryTable">
+            <thead>
+              <tr>
+                <th style="width: 105px;">SKU ID</th>
+                <th>Product Name & Category</th>
+                <th style="width: 120px;" class="text-right">In-Store Stock</th>
+                <th style="width: 120px;" class="text-right">Wholesale (₹)</th>
+                <th style="width: 175px;" class="text-right">Shelf Price (₹)</th>
+                <th style="width: 190px;">Chiller Sensor (°C)</th>
+                <th style="width: 120px;">Expiry Window</th>
+                <th style="width: 195px;">POS Status Badge</th>
+                <th style="width: 150px;" class="text-center">Live Demo Trigger</th>
+              </tr>
+            </thead>
+            <tbody id="inventoryTableBody">
+              <!-- Dynamically populated rows -->
+              <tr class="loading-row">
+                <td colspan="9" class="text-center py-8">
+                  <div class="table-loading-state">
+                    <span class="spinner spinner-dark"></span>
+                    <p>Connecting to Laptop 1 ZeroSpoil Server (<span id="loadingUrlDisplay">...</span>)...</p>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- BOTTOM LIVE MIDDLEWARE EVENT TICKER -->
+      <section class="ticker-section">
+        <div class="ticker-header">
+          <div class="ticker-title-group">
+            <span class="ticker-live-dot"></span>
+            <span class="ticker-title">ZeroSpoil Middleware Agent Event Feed</span>
+            <span class="ticker-sub">(Audit decisions streamed from Laptop 1)</span>
+          </div>
+          <span class="ticker-badge" id="tickerCount">0 Events Logged</span>
+        </div>
+        <div class="ticker-feed" id="tickerFeed">
+          <div class="ticker-empty">Waiting for live agent audit stream from Laptop 1 ZeroSpoil Server...</div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- FOOTER -->
+    <footer class="pos-footer">
+      <div class="footer-left">
+        <span>FreshMart Retail ERP Suite • Version 4.2.14-PROD</span>
+        <span class="bullet">•</span>
+        <span>Store Protocol: <code>LAN-REST-JSON-v1</code></span>
+      </div>
+      <div class="footer-right">
+        <span>Laptop 2 (POS Client) &harr; Laptop 1 (ZeroSpoil AI Agent Middleware)</span>
+      </div>
+    </footer>
+  </div>
+
+  <script src="pos.js"></script>
+</body>
+</html>
